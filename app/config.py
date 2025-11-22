@@ -46,3 +46,7 @@ SAFETY_SCORE = os.environ.get("SAFETY_SCORE", "false").lower() == "true"
 # Proxy settings
 PROXY_URL = os.environ.get("PROXY_URL")
 SSL_CERT_FILE = os.environ.get("SSL_CERT_FILE")
+
+# ImgBB API Key
+# Priority: IMGBB > IM
+IMGBB_API_KEY = os.environ.get("IMGBB") or os.environ.get("IM")

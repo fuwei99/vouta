@@ -47,7 +47,7 @@ async def startup_event():
     
     # Determine overall status
     if sa_count > 0 or express_keys_count > 0:
-        print("INFO: Vertex AI authentication initialization completed successfully. At least one authentication method is available.")
+        print("INFO: vouta authentication initialization completed successfully. At least one authentication method is available.")
         if sa_count == 0:
             print("INFO: No SA credentials found, but Express API keys are available for authentication.")
         elif express_keys_count == 0:
