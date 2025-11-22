@@ -9,7 +9,6 @@ import config as app_config
 
 from google.genai import types
 from models import OpenAIMessage, ContentPartText, ContentPartImage
-import file_upload_bed
 
 SUPPORTED_ROLES = ["user", "model", "function"] # Added "function" for Gemini
 
@@ -439,14 +438,8 @@ def deobfuscate_text(text: str) -> str:
     return text
 
 def _convert_image_to_markdown(image_data: bytes, mime_type: str) -> str:
-    """Convert image data to markdown format with base64 encoding or ImgBB URL."""
+    """Convert image data to markdown format with base64 encoding."""
     try:
-        # Try uploading to ImgBB first
-        imgbb_url = file_upload_bed.upload_image_to_imgbb(image_data)
-        if imgbb_url:
-            return f"![Image]({imgbb_url})"
-            
-        # Fallback to base64 if upload fails or not configured
         # Convert bytes to base64 string
         b64_data = base64.b64encode(image_data).decode('utf-8')
         # Create markdown image with data URL
