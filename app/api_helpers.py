@@ -107,7 +107,21 @@ def create_openai_error_response(status_code: int, message: str, error_type: str
     return {"error": {"message": message, "type": error_type, "code": status_code, "param": None}}
 
 def create_generation_config(request: OpenAIRequest) -> Dict[str, Any]:
-    config: Dict[str, Any] = {} 
+    config: Dict[str, Any] = {}
+    
+    # Check for -2k or -4k suffix to add image generation capabilities
+    model_name = request.model
+    if model_name.endswith('-2k'):
+        # Add image generation config for 2k resolution
+        config["responseModalities"] = ["TEXT", "IMAGE"]
+        config["imageConfig"] = {"imageSize": "2k"}
+        print(f"Detected -2k suffix, adding image generation config with 2k resolution")
+    elif model_name.endswith('-4k'):
+        # Add image generation config for 4k resolution
+        config["responseModalities"] = ["TEXT", "IMAGE"]
+        config["imageConfig"] = {"imageSize": "4k"}
+        print(f"Detected -4k suffix, adding image generation config with 4k resolution")
+    
     if request.temperature is not None: config["temperature"] = request.temperature
     if request.max_tokens is not None: config["max_output_tokens"] = request.max_tokens
     if request.top_p is not None: config["top_p"] = request.top_p

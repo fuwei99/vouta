@@ -30,6 +30,53 @@ def extract_reasoning_by_tags(full_text: str, tag_name: str) -> Tuple[str, str]:
     reasoning_content = "".join(reasoning_parts)
     return reasoning_content.strip(), normal_text.strip()
 
+def _extract_markdown_images_to_parts(text: str) -> Tuple[List[types.Part], str]:
+    """
+    Extract markdown images from text and convert them to Gemini Parts.
+    Returns a tuple of (image_parts, text_without_images)
+    """
+    parts = []
+    remaining_text = text
+    
+    # Pattern to match markdown images with data URLs
+    # Matches: ![alt text](data:image/...;base64,data)
+    # Only matches image MIME types to avoid extracting other base64 data
+    pattern = r'!\[[^\]]*\]\(data:(image/[^;]+);base64,([^)]+)\)'
+    
+    matches = list(re.finditer(pattern, text))
+    
+    if matches:
+        # Process matches in reverse order to maintain correct text positions
+        for match in reversed(matches):
+            mime_type = match.group(1)
+            b64_data = match.group(2)
+            
+            # Validate that it's an image MIME type
+            if not mime_type.startswith('image/'):
+                continue
+            
+            try:
+                # Convert base64 to bytes
+                image_bytes = base64.b64decode(b64_data)
+                # Create Gemini image part
+                parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+                
+                # Remove the markdown image from text
+                start, end = match.span()
+                remaining_text = remaining_text[:start] + remaining_text[end:]
+                
+                print(f"Extracted markdown image with mime type: {mime_type}")
+            except Exception as e:
+                print(f"Error extracting markdown image: {e}")
+        
+        # Reverse parts list since we processed matches in reverse
+        parts.reverse()
+    
+    # Clean up any extra whitespace that might be left
+    remaining_text = re.sub(r'\s+', ' ', remaining_text).strip()
+    
+    return parts, remaining_text
+
 def create_gemini_prompt(messages: List[OpenAIMessage]) -> List[types.Content]:
     print("Converting OpenAI messages to Gemini format...")
     gemini_messages = []
@@ -77,14 +124,25 @@ def create_gemini_prompt(messages: List[OpenAIMessage]) -> List[types.Content]:
                         args=parsed_arguments
                     ))
             
-            if message.content: 
+            if message.content:
                 if isinstance(message.content, str):
-                    parts.append(types.Part(text=message.content))
+                    # Check for markdown images in assistant content too
+                    image_parts, clean_text = _extract_markdown_images_to_parts(message.content)
+                    
+                    if clean_text:
+                        parts.append(types.Part(text=clean_text))
+                    
+                    parts.extend(image_parts)
                 elif isinstance(message.content, list):
                      for part_item in message.content: 
                         if isinstance(part_item, dict):
                             if part_item.get('type') == 'text':
-                                parts.append(types.Part(text=part_item.get('text', '\n')))
+                                text_content = part_item.get('text', '\n')
+                                # Check for markdown images in assistant's text parts
+                                image_parts, clean_text = _extract_markdown_images_to_parts(text_content)
+                                if clean_text:
+                                    parts.append(types.Part(text=clean_text))
+                                parts.extend(image_parts)
                             elif part_item.get('type') == 'image_url':
                                 image_url_data = part_item.get('image_url', {})
                                 image_url = image_url_data.get('url', '')
@@ -124,12 +182,25 @@ def create_gemini_prompt(messages: List[OpenAIMessage]) -> List[types.Content]:
                 current_gemini_role = "user"
 
             if isinstance(message.content, str):
-                parts.append(types.Part(text=message.content))
+                # Check for markdown images in the content
+                image_parts, clean_text = _extract_markdown_images_to_parts(message.content)
+                
+                # Add text part if there's any remaining text
+                if clean_text:
+                    parts.append(types.Part(text=clean_text))
+                
+                # Add extracted image parts
+                parts.extend(image_parts)
             elif isinstance(message.content, list):
                 for part_item in message.content:
                     if isinstance(part_item, dict):
                         if part_item.get('type') == 'text':
-                            parts.append(types.Part(text=part_item.get('text', '\n')))
+                            text_content = part_item.get('text', '\n')
+                            # Check for markdown images in text parts
+                            image_parts, clean_text = _extract_markdown_images_to_parts(text_content)
+                            if clean_text:
+                                parts.append(types.Part(text=clean_text))
+                            parts.extend(image_parts)
                         elif part_item.get('type') == 'image_url':
                             image_url_data = part_item.get('image_url', {})
                             image_url = image_url_data.get('url', '')
@@ -193,13 +264,30 @@ def create_encrypted_gemini_prompt(messages: List[OpenAIMessage]) -> List[types.
     for i, message in enumerate(messages):
         if message.role == "user":
             if isinstance(message.content, str):
-                new_messages.append(OpenAIMessage(role=message.role, content=urllib.parse.quote(message.content)))
+                # First extract any markdown images before encoding
+                image_parts, clean_text = _extract_markdown_images_to_parts(message.content)
+                if image_parts:
+                    # If we have images, we can't encode, so just use original message
+                    print("Bypassing encryption for message with markdown images.")
+                    new_messages.append(message)
+                else:
+                    new_messages.append(OpenAIMessage(role=message.role, content=urllib.parse.quote(clean_text)))
             elif isinstance(message.content, list):
                 encoded_parts = []
+                has_images_in_parts = False
                 for part_item in message.content:
                     if isinstance(part_item, dict) and part_item.get('type') == 'text':
-                        encoded_parts.append({'type': 'text', 'text': urllib.parse.quote(part_item.get('text', ''))})
-                    else: encoded_parts.append(part_item) 
+                        # Check if text contains markdown images (only image MIME types)
+                        text_content = part_item.get('text', '')
+                        if re.search(r'!\[[^\]]*\]\(data:image/[^;]+;base64,[^)]+\)', text_content):
+                            has_images_in_parts = True
+                            encoded_parts.append(part_item)  # Keep original if it has images
+                        else:
+                            encoded_parts.append({'type': 'text', 'text': urllib.parse.quote(text_content)})
+                    else:
+                        encoded_parts.append(part_item)
+                if has_images_in_parts:
+                    print("Bypassing encryption for message parts with markdown images.")
                 new_messages.append(OpenAIMessage(role=message.role, content=encoded_parts))
             else: new_messages.append(message)
         else: new_messages.append(message)
@@ -349,6 +437,19 @@ def deobfuscate_text(text: str) -> str:
     text = text.replace("```", placeholder).replace("``", "").replace("♩", "").replace("`♡`", "").replace("♡", "").replace("` `", "").replace("`", "").replace(placeholder, "```")
     return text
 
+def _convert_image_to_markdown(image_data: bytes, mime_type: str) -> str:
+    """Convert image data to markdown format with base64 encoding."""
+    try:
+        # Convert bytes to base64 string
+        b64_data = base64.b64encode(image_data).decode('utf-8')
+        # Create markdown image with data URL
+        data_url = f"data:{mime_type};base64,{b64_data}"
+        # Return markdown formatted image
+        return f"![Image]({data_url})"
+    except Exception as e:
+        print(f"Error converting image to markdown: {e}")
+        return "[Image could not be displayed]"
+
 def parse_gemini_response_for_reasoning_and_content(gemini_response_candidate: Any) -> Tuple[str, str]:
     reasoning_text_parts = []
     normal_text_parts = []
@@ -369,11 +470,33 @@ def parse_gemini_response_for_reasoning_and_content(gemini_response_candidate: A
             if hasattr(part_item, 'text') and part_item.text is not None:
                 part_text = str(part_item.text)
             
+            # Check for image parts
+            elif hasattr(part_item, 'inline_data') and part_item.inline_data is not None:
+                # Handle image data in response
+                inline_data = part_item.inline_data
+                if hasattr(inline_data, 'data') and hasattr(inline_data, 'mime_type'):
+                    image_bytes = inline_data.data
+                    mime_type = inline_data.mime_type
+                    # Convert image to markdown format
+                    part_text = _convert_image_to_markdown(image_bytes, mime_type)
+            
+            # Check for blob/file reference (for images stored in blob)
+            elif hasattr(part_item, 'file_data') and part_item.file_data is not None:
+                # Handle file reference (typically for images)
+                file_data = part_item.file_data
+                if hasattr(file_data, 'file_uri'):
+                    # Create a markdown link to the file
+                    file_uri = file_data.file_uri
+                    mime_type = getattr(file_data, 'mime_type', 'image/png')
+                    # For file URIs, we can't embed directly, so we'll create a link
+                    part_text = f"![Image]({file_uri})"
+                    print(f"Image file reference found: {file_uri}")
+            
             part_is_thought = hasattr(part_item, 'thought') and part_item.thought is True
 
             if part_is_thought:
                 reasoning_text_parts.append(part_text)
-            elif part_text: # Only add if it's not a function_call and has text
+            elif part_text: # Only add if it's not a function_call and has text or converted image
                 normal_text_parts.append(part_text)
     elif candidate_part_text:
         normal_text_parts.append(candidate_part_text)

@@ -59,6 +59,8 @@ async def chat_completions(fastapi_request: Request, request: OpenAIRequest, api
         is_encrypted_full_model = request.model.endswith("-encrypt-full")
         is_nothinking_model = request.model.endswith("-nothinking")
         is_max_thinking_model = request.model.endswith("-max")
+        is_2k_image_model = request.model.endswith("-2k")
+        is_4k_image_model = request.model.endswith("-4k")
         base_model_name = request.model # Start with the full model name
 
         # Determine base_model_name by stripping known prefixes and suffixes
@@ -90,6 +92,8 @@ async def chat_completions(fastapi_request: Request, request: OpenAIRequest, api
         elif is_encrypted_model: base_model_name = base_model_name[:-len("-encrypt")]
         elif is_nothinking_model: base_model_name = base_model_name[:-len("-nothinking")]
         elif is_max_thinking_model: base_model_name = base_model_name[:-len("-max")]
+        elif is_2k_image_model: base_model_name = base_model_name[:-len("-2k")]
+        elif is_4k_image_model: base_model_name = base_model_name[:-len("-4k")]
         
         # # Specific model variant checks (if any remain exclusive and not covered dynamically)
         # if is_nothinking_model and not (base_model_name.startswith("gemini-2.5-flash") or base_model_name == "gemini-2.5-pro-preview-06-05"):
@@ -257,7 +261,7 @@ async def chat_completions(fastapi_request: Request, request: OpenAIRequest, api
             
             if "gemini-2.5-flash-lite" in base_model_name and is_max_thinking_model:
                 gen_config_dict["thinking_config"]["include_thoughts"] = True
-            elif "gemini-2.5-flash-lite" in base_model_name:
+            elif "gemini-2.5-flash-lite" in base_model_name or "image" in base_model_name:
                 gen_config_dict["thinking_config"]["include_thoughts"] = False
             else:
                 gen_config_dict["thinking_config"]["include_thoughts"] = True
